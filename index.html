@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Find the Seconds</title>
+  <style>
+    :root {
+      --bg: #121418;
+      --panel: #1b1e25;
+      --panel-2: #252a33;
+      --border: #333945;
+      --text: #f2f3f6;
+      --muted: #b6bcc8;      /* secondary text, still easy to read */
+      --red: #ff4545;
+      --green: #2eea6a;
+      --blue: #4c86ff;
+      --high: #ffb057;       /* guess too high */
+      --low: #66d0ff;        /* guess too low */
+      --gold: #ffd43b;
+      --danger: #ff7a7a;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-size: 17px;
+      line-height: 1.5;
+      padding: 28px 16px;
+    }
+
+    /* Layout: game on the left, scoreboard on the right */
+    .page {
+      max-width: 960px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 20px;
+      align-items: start;
+    }
+    @media (max-width: 780px) {
+      .page { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+    }
+
+    header { grid-column: 1 / -1; text-align: center; }
+    h1 { margin: 0; font-size: 34px; letter-spacing: -0.5px; }
+    .tagline { color: var(--muted); margin: 4px 0 0; font-size: 18px; }
+
+    /* How to play */
+    details.rules {
+      grid-column: 1 / -1;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 14px 22px;
+    }
+    details.rules summary { cursor: pointer; font-weight: 700; font-size: 18px; }
+    details.rules ol { margin: 10px 0 4px; padding-left: 24px; color: var(--muted); }
+    details.rules li { margin: 6px 0; }
+    details.rules strong { color: var(--text); }
+    .g { color: var(--green); font-weight: 700; }
+    .r { color: var(--red); font-weight: 700; }
+
+    /* Game panel */
+    .game { text-align: center; }
+
+    /* Round progress: "Round 2 of 3" + dots */
+    .progress {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 20px;
+    }
+    .dots { display: flex; gap: 6px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
+    .dot.done { background: var(--blue); }
+    .dot.now { background: var(--text); }
+
+    .lights {
+      display: flex;
+      justify-content: center;
+      gap: 40px;
+      margin-bottom: 18px;
+    }
+    .light {
+      width: 110px;
+      height: 110px;
+      border-radius: 50%;
+      border: 4px solid var(--border);
+      transition: background 0.05s, box-shadow 0.05s;
+    }
+    .red   { background: #3b1717; }
+    .green { background: #11321c; }
+    .red.on   { background: var(--red);   box-shadow: 0 0 44px var(--red); }
+    .green.on { background: var(--green); box-shadow: 0 0 44px var(--green); }
+
+    /* "What to do now" line */
+    .status {
+      font-size: 20px;
+      font-weight: 600;
+      min-height: 30px;
+      margin: 0 0 22px;
+    }
+    /* "Green was on for 9.24 s" - bigger, with the number biggest */
+    .actual-line {
+      display: block;
+      font-size: 26px;
+      font-weight: 700;
+      line-height: 1.2;
+      margin-bottom: 8px;
+    }
+    .big-time {
+      display: inline-block;
+      font-size: 48px;
+      font-weight: 800;
+      color: var(--green);
+      letter-spacing: -1px;
+      vertical-align: -4px;
+    }
+
+    /* Full-screen layer for the end-of-game bouncing lights */
+    #celebration {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 100;
+      transition: opacity 1s;
+    }
+
+    button {
+      font: inherit;
+      font-size: 18px;
+      font-weight: 700;
+      padding: 13px 34px;
+      border: none;
+      border-radius: 10px;
+      background: var(--blue);
+      color: white;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.1); }
+    button:disabled { background: #3a3f4a; color: #8b919c; cursor: default; filter: none; }
+    button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+
+    input {
+      font: inherit;
+      font-size: 22px;
+      font-weight: 600;
+      padding: 8px;
+      text-align: center;
+      border-radius: 8px;
+      border: 2px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+    }
+    input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(76,134,255,0.3); }
+    input::placeholder { color: #6c7380; }
+
+    /* Player count */
+    .setup { display: flex; justify-content: center; gap: 10px; }
+    .setup input { width: 84px; }
+
+    /* Guess rows */
+    .guess-help { color: var(--muted); margin: 0 0 12px; }
+    .guess-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      background: var(--panel-2);
+      border: 2px solid transparent;
+      border-radius: 10px;
+      padding: 10px 16px;
+      margin: 8px auto;
+      max-width: 340px;
+    }
+    .guess-row.missing { border-color: var(--danger); }
+    .guess-row .name { font-weight: 700; font-size: 18px; }
+    .time-input { display: flex; align-items: center; gap: 4px; font-size: 22px; font-weight: 700; }
+    .time-input input { width: 58px; }
+    .time-input .unit { margin-left: 4px; color: var(--muted); font-size: 18px; }
+
+    .error { color: var(--danger); font-weight: 600; min-height: 1.5em; margin-top: 12px; }
+
+    /* Round result */
+    .ranking { list-style: none; padding: 0; margin: 0 0 22px; text-align: left; }
+    .ranking li {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      background: var(--panel-2);
+      border: 2px solid transparent;
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin: 8px 0;
+    }
+    .ranking li.best { border-color: var(--green); }
+    .ranking .who { font-weight: 700; font-size: 18px; }
+    .ranking .guessed { color: var(--muted); font-size: 15px; }
+    .ranking .off { text-align: right; font-weight: 700; font-size: 18px; white-space: nowrap; }
+    .ranking .off small { display: block; font-size: 13px; font-weight: 600; }
+
+    .plus  { color: var(--high); }
+    .minus { color: var(--low); }
+    .exact { color: var(--green); }
+
+    .buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+    /* Scoreboard */
+    .scoreboard { position: sticky; top: 16px; }
+    .scoreboard h2 { margin: 0; font-size: 22px; }
+    .scoreboard .sub { color: var(--muted); font-size: 15px; margin: 2px 0 16px; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 16px; }
+    th, td { padding: 10px 4px; text-align: center; }
+    th { color: var(--muted); font-size: 14px; font-weight: 600; border-bottom: 2px solid var(--border); }
+    th.current { color: var(--text); }
+    td:first-child, th:first-child { text-align: left; }
+    td.name { font-weight: 700; white-space: nowrap; }
+    td.total { font-weight: 800; font-size: 18px; white-space: nowrap; }
+    tbody tr + tr td { border-top: 1px solid var(--border); }
+    tr.leader td.name, tr.leader td.total { color: var(--gold); }
+    .rank { display: inline-block; width: 22px; color: var(--muted); font-weight: 600; }
+
+    .legend {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+      font-size: 15px;
+      color: var(--muted);
+    }
+    .legend b { display: inline-block; width: 18px; }
+    .empty { color: var(--muted); }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <h1>⏱️ Find the Seconds</h1>
+      <p class="tagline">Watch the green light. Guess how long it was on.</p>
+    </header>
+
+    <!-- How to play -->
+    <details class="rules" open>
+      <summary>How to play</summary>
+      <ol>
+        <li>Choose <strong>how many players</strong>. A game has <strong>3 rounds</strong>.</li>
+        <li>Press <strong>Start</strong>. The <span class="g">green</span> light turns on. Everyone counts in their head.</li>
+        <li>After a random time (<strong>up to 10 seconds</strong>) the light switches back to <span class="r">red</span>.</li>
+        <li>Each player types their guess, like <strong>4 . 37</strong> for 4.37 seconds.</li>
+        <li>The player with the <strong>lowest total time off</strong> after 3 rounds wins!</li>
+      </ol>
+    </details>
+
+    <!-- Left: the game -->
+    <main class="panel game">
+      <div id="progress" class="progress hidden">
+        <span id="roundText"></span>
+        <div class="dots" id="dots"></div>
+      </div>
+
+      <div class="lights">
+        <div id="red" class="light red on"></div>
+        <div id="green" class="light green on"></div>
+      </div>
+
+      <p id="status" class="status"></p>
+
+      <!-- Step 1: how many players -->
+      <form id="setupForm">
+        <div class="setup">
+          <input id="playerCount" type="number" min="1" max="10" value="2" aria-label="Number of players">
+          <button type="submit">Continue</button>
+        </div>
+        <div id="setupError" class="error"></div>
+      </form>
+
+      <!-- Step 2: start -->
+      <div id="startArea" class="hidden">
+        <button id="startBtn">▶ Start</button>
+      </div>
+
+      <!-- Step 3: guesses -->
+      <form id="guessForm" class="hidden">
+        <p class="guess-help">Seconds, then 2 digits. Press <strong>.</strong> to jump to the second box.</p>
+        <div id="guessRows"></div>
+        <br>
+        <button type="submit">Show results</button>
+        <div id="error" class="error"></div>
+      </form>
+
+      <!-- Step 4: round result -->
+      <div id="result" class="hidden">
+        <ol class="ranking" id="ranking"></ol>
+        <div class="buttons">
+          <button id="nextBtn">Next round →</button>
+          <button id="newGameBtn" class="hidden">Play again</button>
+          <button id="changeBtn" class="secondary hidden">Change players</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Right: scoreboard (always visible) -->
+    <aside class="panel scoreboard">
+      <h2>Scoreboard</h2>
+      <p class="sub">Seconds off in each round. Lowest total wins.</p>
+      <div id="scoreboard"><p class="empty">Scores will show here once you pick the players.</p></div>
+      <div class="legend">
+        <span><b class="plus">+</b> guessed too high</span>
+        <span><b class="minus">−</b> guessed too low</span>
+        <span><b>👑</b> currently winning</span>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Bouncing lights when the game ends -->
+  <canvas id="celebration" class="hidden"></canvas>
+
+  <script>
+    // --- Page elements ---
+    const $ = (id) => document.getElementById(id);
+    const red = $('red'), green = $('green');
+    const statusText = $('status');
+    const progress = $('progress'), roundText = $('roundText'), dots = $('dots');
+    const setupForm = $('setupForm'), playerCountInput = $('playerCount'), setupError = $('setupError');
+    const startArea = $('startArea'), startBtn = $('startBtn');
+    const guessForm = $('guessForm'), guessRows = $('guessRows'), errorBox = $('error');
+    const resultBox = $('result'), ranking = $('ranking');
+    const nextBtn = $('nextBtn'), newGameBtn = $('newGameBtn'), changeBtn = $('changeBtn');
+    const scoreboardBox = $('scoreboard');
+
+    // --- Settings ---
+    const MIN_WAIT = 1000;   // 1 second
+    const MAX_WAIT = 10000;  // 10 seconds
+    const MAX_PLAYERS = 10;
+    const TOTAL_ROUNDS = 3;
+
+    // --- Game state (kept only while the page is open) ---
+    // Times are whole hundredths of a second (437 = 4.37 s), so totals never get rounding errors.
+    let players = [];   // [{ name, rounds: [signed hundredths or null], total }]
+    let round = 0;      // current round index (0, 1, 2)
+    let actualH = 0;    // how long green was really on
+
+    // --- Helpers ---
+    function showStep(step) {
+      setupForm.classList.toggle('hidden', step !== 'setup');
+      startArea.classList.toggle('hidden', step !== 'start');
+      guessForm.classList.toggle('hidden', step !== 'guess');
+      resultBox.classList.toggle('hidden', step !== 'result');
+    }
+
+    function setStatus(text) { statusText.innerHTML = text; }
+
+    function showGreen(isGreen) {
+      green.classList.toggle('on', isGreen);
+      red.classList.toggle('on', !isGreen);
+    }
+    function bothOn() { red.classList.add('on'); green.classList.add('on'); }
+
+    // 437 -> "4.37 s"
+    function formatTime(h) { return (h / 100).toFixed(2) + ' s'; }
+    // -22 -> "0.22"
+    function formatOff(h) { return (Math.abs(h) / 100).toFixed(2); }
+
+    // Short version for the scoreboard: +0.20 / −0.30 / 0.00 🎯
+    function signedShort(h) {
+      if (h > 0) return `<span class="plus">+${formatOff(h)}</span>`;
+      if (h < 0) return `<span class="minus">−${formatOff(h)}</span>`;
+      return `<span class="exact">0.00 🎯</span>`;
+    }
+    // Long version for round results, with words
+    function signedLong(h) {
+      if (h > 0) return `<span class="plus">+${formatOff(h)} s<small>too high</small></span>`;
+      if (h < 0) return `<span class="minus">−${formatOff(h)} s<small>too low</small></span>`;
+      return `<span class="exact">Exact! 🎯<small>0.00 s off</small></span>`;
+    }
+
+    function names(list) { return list.map(p => p.name).join(' & '); }
+
+    // Round progress: "Round 2 of 3" + dots
+    function renderProgress() {
+      progress.classList.remove('hidden');
+      roundText.textContent = `Round ${round + 1} of ${TOTAL_ROUNDS}`;
+      dots.innerHTML = '';
+      for (let i = 0; i < TOTAL_ROUNDS; i++) {
+        const d = document.createElement('span');
+        d.className = 'dot' + (i < round ? ' done' : i === round ? ' now' : '');
+        dots.appendChild(d);
+      }
+    }
+
+    // --- Scoreboard ---
+    function renderScoreboard() {
+      if (players.length === 0) {
+        scoreboardBox.innerHTML = '<p class="empty">Scores will show here once you pick the players.</p>';
+        return;
+      }
+
+      const played = players[0].rounds.filter(r => r !== null).length;
+      const sorted = [...players];
+      if (played > 0) sorted.sort((a, b) => a.total - b.total);
+      const bestTotal = sorted[0].total;
+
+      let html = '<table><thead><tr><th>Player</th>';
+      for (let r = 0; r < TOTAL_ROUNDS; r++) {
+        const current = r === round && played < TOTAL_ROUNDS;
+        html += `<th class="${current ? 'current' : ''}">R${r + 1}</th>`;
+      }
+      html += '<th>Total</th></tr></thead><tbody>';
+
+      sorted.forEach(p => {
+        const leader = played > 0 && players.length > 1 && p.total === bestTotal;
+        // Same total = same place
+        const place = played > 0 ? sorted.filter(o => o.total < p.total).length + 1 : '';
+        html += `<tr class="${leader ? 'leader' : ''}">
+          <td class="name"><span class="rank">${place}</span>${p.name}</td>`;
+        p.rounds.forEach(r => { html += `<td>${r === null ? '–' : signedShort(r)}</td>`; });
+        html += `<td class="total">${played > 0 ? formatOff(p.total) : '–'}${leader ? ' 👑' : ''}</td></tr>`;
+      });
+
+      scoreboardBox.innerHTML = html + '</tbody></table>';
+    }
+
+    // --- Game flow ---
+    function goToSetup() {
+      players = [];
+      bothOn();
+      progress.classList.add('hidden');
+      setStatus('How many people are playing?');
+      renderScoreboard();
+      showStep('setup');
+      playerCountInput.focus();
+    }
+
+    function newGame(count) {
+      players = [];
+      for (let i = 1; i <= count; i++) {
+        players.push({ name: `Player ${i}`, rounds: Array(TOTAL_ROUNDS).fill(null), total: 0 });
+      }
+      round = 0;
+      readyForRound();
+    }
+
+    function readyForRound() {
+      startBtn.disabled = false;
+      bothOn();
+      renderProgress();
+      renderScoreboard();
+      setStatus('Everyone ready? Press <strong>Start</strong> and watch the green light.');
+      showStep('start');
+      startBtn.focus();
+    }
+
+    // Build one guess row per player: [ 4 ] . [ 37 ] s
+    function buildGuessRows() {
+      guessRows.innerHTML = '';
+      players.forEach(p => {
+        const row = document.createElement('div');
+        row.className = 'guess-row';
+        row.innerHTML = `
+          <span class="name">${p.name}</span>
+          <span class="time-input">
+            <input class="sec" type="text" inputmode="decimal" maxlength="2" placeholder="0" autocomplete="off" aria-label="${p.name} seconds">
+            .
+            <input class="ms" type="text" inputmode="numeric" maxlength="2" placeholder="00" autocomplete="off" aria-label="${p.name} hundredths">
+            <span class="unit">s</span>
+          </span>`;
+        guessRows.appendChild(row);
+      });
+
+      const inputs = [...guessRows.querySelectorAll('input')];
+      inputs.forEach((input, i) => {
+        // Pressing "." or "," in the seconds box jumps to the next box
+        input.addEventListener('keydown', (e) => {
+          if ((e.key === '.' || e.key === ',') && input.classList.contains('sec')) {
+            e.preventDefault();
+            inputs[i + 1].focus();
+          }
+        });
+        input.addEventListener('input', () => {
+          input.value = input.value.replace(/\D/g, '');   // digits only
+          input.closest('.guess-row').classList.remove('missing');
+          // Box full -> jump to the next one
+          if (input.value.length === 2 && inputs[i + 1]) inputs[i + 1].focus();
+        });
+      });
+    }
+
+    // Step 1: number of players
+    setupForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const count = Number(playerCountInput.value);
+      if (!Number.isInteger(count) || count < 1 || count > MAX_PLAYERS) {
+        setupError.textContent = `Please enter a number from 1 to ${MAX_PLAYERS}.`;
+        return;
+      }
+      setupError.textContent = '';
+      newGame(count);
+    });
+
+    // Step 2: run the lights
+    startBtn.addEventListener('click', () => {
+      startBtn.disabled = true;
+      showGreen(true);
+      setStatus('👀 Green is on… count in your head!');
+      const startTime = performance.now();
+      const wait = MIN_WAIT + Math.random() * (MAX_WAIT - MIN_WAIT);
+
+      setTimeout(() => {
+        showGreen(false);
+        actualH = Math.round((performance.now() - startTime) / 10);
+
+        buildGuessRows();
+        errorBox.textContent = '';
+        setStatus('🛑 Stop! How long was green on?');
+        showStep('guess');
+        guessRows.querySelector('input').focus();
+      }, wait);
+    });
+
+    // Step 3: check guesses
+    guessForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const rows = [...guessRows.querySelectorAll('.guess-row')];
+      const results = [];
+      const missing = [];
+
+      rows.forEach((row, i) => {
+        const secText = row.querySelector('.sec').value.trim();
+        const msText = row.querySelector('.ms').value.trim();
+        if (secText === '' && msText === '') {
+          row.classList.add('missing');
+          missing.push(players[i].name);
+          return;
+        }
+        // "4" + "37" -> 437. Reads like a decimal, so "4" + "5" means 4.50.
+        const guessH = Number(secText || 0) * 100 + Number(msText.padEnd(2, '0'));
+        results.push({ player: players[i], guessH, signed: guessH - actualH });
+      });
+
+      if (missing.length > 0) {
+        errorBox.textContent = `Missing a guess: ${missing.join(', ')}`;
+        return;
+      }
+
+      results.forEach(r => {
+        r.player.rounds[round] = r.signed;
+        r.player.total += Math.abs(r.signed);
+      });
+
+      showRoundResult(results);
+    });
+
+    // Step 4: ranking for this round (closest first)
+    function showRoundResult(results) {
+      results.sort((a, b) => Math.abs(a.signed) - Math.abs(b.signed));
+      const bestOff = Math.abs(results[0].signed);
+      const roundWinners = results.filter(r => Math.abs(r.signed) === bestOff).map(r => r.player);
+
+      ranking.innerHTML = '';
+      const medals = ['🥇', '🥈', '🥉'];
+      results.forEach(r => {
+        const place = results.filter(o => Math.abs(o.signed) < Math.abs(r.signed)).length;
+        const li = document.createElement('li');
+        if (place === 0) li.classList.add('best');
+        li.innerHTML = `
+          <span>
+            <span class="who">${medals[place] || (place + 1) + '.'} ${r.player.name}</span><br>
+            <span class="guessed">guessed ${formatTime(r.guessH)}</span>
+          </span>
+          <span class="off">${signedLong(r.signed)}</span>`;
+        ranking.appendChild(li);
+      });
+
+      const isLast = round === TOTAL_ROUNDS - 1;
+      // Line 1 (big): the real time. Line 2 (normal): who won.
+      const actual = `<span class="actual-line">Green was on for <span class="big-time">${formatTime(actualH)}</span></span>`;
+
+      if (!isLast) {
+        const who = players.length === 1 ? '' :
+          `${names(roundWinners)} ${roundWinners.length > 1 ? 'tie this round' : 'wins this round'}!`;
+        setStatus(`${actual}${who}`);
+      } else {
+        const bestTotal = Math.min(...players.map(p => p.total));
+        const gameWinners = players.filter(p => p.total === bestTotal);
+        let text;
+        if (players.length === 1) text = `Game over! You were off by ${formatOff(bestTotal)} s in total.`;
+        else if (gameWinners.length === 1) text = `🏆 ${gameWinners[0].name} wins the game!`;
+        else text = `🤝 It's a tie: ${names(gameWinners)}!`;
+        setStatus(`${actual}${text}`);
+        roundText.textContent = 'Game over';
+        dots.querySelectorAll('.dot').forEach(d => d.className = 'dot done');
+        celebrate();
+      }
+
+      nextBtn.classList.toggle('hidden', isLast);
+      newGameBtn.classList.toggle('hidden', !isLast);
+      changeBtn.classList.toggle('hidden', !isLast);
+
+      renderScoreboard();
+      showStep('result');
+      (isLast ? newGameBtn : nextBtn).focus();
+    }
+
+    // --- End-of-game celebration ---
+    // Red and green lights pop out of the two big lights, fall and bounce
+    // along the bottom of the screen. The canvas is never cleared while it
+    // runs, so every light leaves a trail behind it.
+    const canvas = $('celebration');
+    const ctx = canvas.getContext('2d');
+    let celebrationTimer = null;   // spawns new lights
+    let animationId = null;        // drawing loop
+    let stopTimer = null;          // ends the show
+
+    function celebrate() {
+      // Skip the animation for people who turned off motion in their system settings
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      stopCelebration();
+
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      canvas.style.opacity = '1';
+      canvas.classList.remove('hidden');
+
+      const balls = [];
+      const RADIUS = 22;
+      const GRAVITY = 0.45;
+      const BOUNCE = 0.78;   // keeps 78% of its speed after each bounce
+      let useGreen = true;
+
+      // Launch one light from the red or green circle (taking turns)
+      function spawn() {
+        const source = useGreen ? green : red;
+        const box = source.getBoundingClientRect();
+        const direction = Math.random() < 0.5 ? -1 : 1;
+        balls.push({
+          x: box.left + box.width / 2,
+          y: box.top + box.height / 2,
+          vx: direction * (2 + Math.random() * 5),
+          vy: -(7 + Math.random() * 7),   // pop up first
+          color: useGreen ? '#2eea6a' : '#ff4545',
+        });
+        useGreen = !useGreen;
+      }
+
+      function drawBall(b) {
+        const glow = ctx.createRadialGradient(b.x - 6, b.y - 6, 2, b.x, b.y, RADIUS);
+        glow.addColorStop(0, '#ffffff');
+        glow.addColorStop(0.35, b.color);
+        glow.addColorStop(1, b.color + '99');
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = glow;
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#121418';
+        ctx.stroke();
+      }
+
+      function frame() {
+        const floor = window.innerHeight - RADIUS;
+        for (let i = balls.length - 1; i >= 0; i--) {
+          const b = balls[i];
+          b.vy += GRAVITY;
+          b.x += b.vx;
+          b.y += b.vy;
+          if (b.y > floor) {          // hit the bottom: bounce
+            b.y = floor;
+            b.vy = -b.vy * BOUNCE;
+          }
+          drawBall(b);
+          // Remove lights that left the screen
+          if (b.x < -RADIUS * 2 || b.x > window.innerWidth + RADIUS * 2) balls.splice(i, 1);
+        }
+        animationId = requestAnimationFrame(frame);
+      }
+
+      spawn();
+      celebrationTimer = setInterval(spawn, 300);
+      animationId = requestAnimationFrame(frame);
+
+      // Stop launching after 5 s, fade everything out after 8 s
+      setTimeout(() => clearInterval(celebrationTimer), 5000);
+      stopTimer = setTimeout(fadeOutCelebration, 8000);
+    }
+
+    function fadeOutCelebration() {
+      canvas.style.opacity = '0';
+      stopTimer = setTimeout(stopCelebration, 1000);
+    }
+
+    function stopCelebration() {
+      clearInterval(celebrationTimer);
+      clearTimeout(stopTimer);
+      cancelAnimationFrame(animationId);
+      canvas.classList.add('hidden');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // Click anywhere to end the show early
+    document.addEventListener('click', () => {
+      if (!canvas.classList.contains('hidden')) fadeOutCelebration();
+    });
+
+    // Buttons after a round
+    nextBtn.addEventListener('click', () => { round++; readyForRound(); });
+    newGameBtn.addEventListener('click', () => { stopCelebration(); newGame(players.length); });
+    changeBtn.addEventListener('click', () => { stopCelebration(); goToSetup(); });
+
+    // First screen
+    goToSetup();
+  </script>
+</body>
+</html>
