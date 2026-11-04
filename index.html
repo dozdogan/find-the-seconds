@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Find the Seconds</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⏱️</text></svg>">
   <style>
     :root {
       --bg: #121418;
@@ -736,6 +737,329 @@
 
     // First screen
     goToSetup();
+  </script>
+  <!-- ===================== Surprises (added on top of the game) ===================== -->
+  <style>
+    /* Sound on/off button in the corner */
+    #soundBtn {
+      position: fixed; top: 12px; right: 12px; z-index: 120;
+      padding: 6px 10px; font-size: 18px; line-height: 1;
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 50%;
+    }
+
+    /* Rare golden light */
+    .green.gold { background: #3a2f0b; }
+    .green.gold.on {
+      background: var(--gold);
+      box-shadow: 0 0 60px var(--gold), 0 0 120px rgba(255, 212, 59, 0.45);
+      animation: goldPulse 0.9s ease-in-out infinite alternate;
+    }
+    @keyframes goldPulse { from { transform: scale(1); } to { transform: scale(1.06); } }
+
+    .gold-banner {
+      display: inline-block; margin-top: 6px; padding: 3px 12px; border-radius: 999px;
+      background: rgba(255, 212, 59, 0.14); color: var(--gold); font-size: 15px; font-weight: 700;
+    }
+
+    /* Badges in the round ranking */
+    .fx-badge {
+      display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px;
+      font-size: 12px; font-weight: 800; vertical-align: 2px; white-space: nowrap;
+      animation: badgePop 0.5s cubic-bezier(.2, 1.6, .4, 1) both;
+    }
+    .fx-badge.clock  { background: rgba(46, 234, 106, 0.16); color: var(--green); }
+    .fx-badge.exact  { background: var(--gold); color: #121418; }
+    .fx-badge.star   { background: rgba(255, 212, 59, 0.16); color: var(--gold); }
+    @keyframes badgePop { from { transform: scale(0); } to { transform: scale(1); } }
+
+    .stars { color: var(--gold); margin-left: 4px; font-size: 14px; }
+
+    /* Screen shake */
+    .shake { animation: shake 0.5s; }
+    @keyframes shake {
+      10%, 90% { transform: translate(-2px, 1px); }
+      20%, 80% { transform: translate(4px, -2px); }
+      30%, 50%, 70% { transform: translate(-6px, 2px); }
+      40%, 60% { transform: translate(6px, -1px); }
+    }
+
+    /* Secret spy stopwatch */
+    #spyWatch {
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 22px; font-weight: 700; color: var(--muted);
+      margin: -6px 0 14px; letter-spacing: 1px;
+    }
+    .spy-note { display: block; margin-top: 6px; font-size: 15px; color: var(--muted); font-weight: 600; }
+
+    .fx-toast {
+      position: fixed; left: 50%; top: 18px; transform: translate(-50%, -140%);
+      z-index: 130; background: var(--panel-2); border: 1px solid var(--gold); color: var(--text);
+      padding: 10px 18px; border-radius: 12px; font-weight: 700; max-width: calc(100% - 32px);
+      text-align: center; transition: transform 0.35s cubic-bezier(.2, 1.4, .4, 1);
+    }
+    .fx-toast.show { transform: translate(-50%, 0); }
+
+    #fxCanvas { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 110; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .green.gold.on, .fx-badge { animation: none; }
+      .shake { animation: none; }
+    }
+  </style>
+
+  <button id="soundBtn" class="secondary" type="button" aria-label="Sound on/off" title="Sound on/off">🔊</button>
+  <canvas id="fxCanvas"></canvas>
+
+  <script>
+  (() => {
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const GOLD_CHANCE = 0.18;   // about 1 in 6 rounds is a golden round
+    const HUMAN_CLOCK = 10;     // within 0.10 s = "Human clock"
+
+    // ---------- 1) Sound effects (WebAudio, no files) ----------
+    let audio = null;
+    let soundOn = true;
+    try { soundOn = localStorage.getItem('fts-sound') !== 'off'; } catch (e) {}
+    const soundBtn = document.getElementById('soundBtn');
+    function paintSoundBtn() { soundBtn.textContent = soundOn ? '🔊' : '🔇'; }
+    paintSoundBtn();
+    soundBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      soundOn = !soundOn;
+      try { localStorage.setItem('fts-sound', soundOn ? 'on' : 'off'); } catch (err) {}
+      paintSoundBtn();
+      if (soundOn) beep(660, 0.08);
+    });
+
+    function ctx() {
+      if (!audio) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return null;
+        audio = new AC();
+      }
+      if (audio.state === 'suspended') audio.resume();
+      return audio;
+    }
+    function beep(freq, dur, type = 'sine', delay = 0, vol = 0.18) {
+      if (!soundOn) return;
+      const a = ctx(); if (!a) return;
+      const t = a.currentTime + delay;
+      const osc = a.createOscillator(), gain = a.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, t);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(gain).connect(a.destination);
+      osc.start(t); osc.stop(t + dur + 0.02);
+    }
+    const sfx = {
+      go:     () => { beep(520, 0.12, 'square', 0, 0.08); beep(880, 0.18, 'square', 0.1, 0.08); },
+      stop:   () => { beep(220, 0.25, 'sawtooth', 0, 0.1); },
+      clock:  () => [523, 659, 784].forEach((f, i) => beep(f, 0.18, 'triangle', i * 0.08)),
+      exact:  () => [523, 659, 784, 1047, 1319].forEach((f, i) => beep(f, 0.3, 'triangle', i * 0.09)),
+      golden: () => [1319, 1568, 1976, 2637].forEach((f, i) => beep(f, 0.25, 'sine', i * 0.06, 0.1)),
+      secret: () => [262, 330, 392, 523, 392, 523].forEach((f, i) => beep(f, 0.12, 'square', i * 0.07, 0.07)),
+    };
+
+    // ---------- Confetti / sparks ----------
+    const fx = document.getElementById('fxCanvas');
+    const fctx = fx.getContext('2d');
+    let parts = [], fxRunning = false;
+    function sizeFx() {
+      const dpr = window.devicePixelRatio || 1;
+      fx.width = window.innerWidth * dpr; fx.height = window.innerHeight * dpr;
+      fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    sizeFx();
+    window.addEventListener('resize', sizeFx);
+
+    function burst(x, y, colors, count = 60, power = 9) {
+      if (reduceMotion) return;
+      for (let i = 0; i < count; i++) {
+        const ang = Math.random() * Math.PI * 2, sp = 2 + Math.random() * power;
+        parts.push({
+          x, y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 3,
+          size: 4 + Math.random() * 5, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4,
+          color: colors[i % colors.length], life: 70 + Math.random() * 50,
+        });
+      }
+      if (!fxRunning) { fxRunning = true; requestAnimationFrame(fxFrame); }
+    }
+    function burstFrom(el, colors, count, power) {
+      const b = el.getBoundingClientRect();
+      burst(b.left + b.width / 2, b.top + b.height / 2, colors, count, power);
+    }
+    function fxFrame() {
+      fctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const p = parts[i];
+        p.vy += 0.25; p.vx *= 0.99; p.x += p.vx; p.y += p.vy; p.rot += p.vr; p.life--;
+        fctx.save();
+        fctx.globalAlpha = Math.max(0, Math.min(1, p.life / 30));
+        fctx.translate(p.x, p.y); fctx.rotate(p.rot);
+        fctx.fillStyle = p.color;
+        fctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+        fctx.restore();
+        if (p.life <= 0 || p.y > window.innerHeight + 20) parts.splice(i, 1);
+      }
+      if (parts.length) requestAnimationFrame(fxFrame);
+      else { fxRunning = false; fctx.clearRect(0, 0, window.innerWidth, window.innerHeight); }
+    }
+
+    function shake() {
+      if (reduceMotion) return;
+      const page = document.querySelector('.page');
+      page.classList.remove('shake'); void page.offsetWidth; page.classList.add('shake');
+    }
+    document.querySelector('.page').addEventListener('animationend', (e) => {
+      if (e.animationName === 'shake') e.currentTarget.classList.remove('shake');
+    });
+
+    let toastTimer = null;
+    function toast(html) {
+      let t = document.querySelector('.fx-toast');
+      if (!t) { t = document.createElement('div'); t.className = 'fx-toast'; document.body.appendChild(t); }
+      t.innerHTML = html;
+      requestAnimationFrame(() => t.classList.add('show'));
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+    }
+
+    const GREENS = ['#2eea6a', '#a6ffbf', '#ffffff', '#4c86ff'];
+    const GOLDS = ['#ffd43b', '#ffb057', '#fff3b0', '#ffffff'];
+
+    // ---------- 2) Rare golden round + 3) secret spy stopwatch ----------
+    let goldenRound = false;
+    let stars = new Map();       // player name -> golden stars won
+    let spyMode = false;
+    let spyTimer = null, spySpeed = 1, spyStart = 0, spyShown = 0;
+
+    const spyWatch = document.createElement('div');
+    spyWatch.id = 'spyWatch';
+    spyWatch.className = 'hidden';
+    document.querySelector('.lights').after(spyWatch);
+
+    // Decide the round's twist the moment Start is pressed
+    startBtn.addEventListener('click', () => {
+      goldenRound = Math.random() < GOLD_CHANCE;
+      green.classList.toggle('gold', goldenRound);
+      if (goldenRound) {
+        sfx.golden();
+        setStatus('✨ <strong style="color:var(--gold)">GOLDEN LIGHT!</strong> Closest guess wins a golden star… count!');
+      } else {
+        sfx.go();
+      }
+      if (spyMode) {
+        spySpeed = 0.75 + Math.random() * 0.5;   // the stopwatch secretly runs fast or slow
+        spyStart = performance.now();
+        spyWatch.classList.remove('hidden');
+        clearInterval(spyTimer);
+        spyTimer = setInterval(() => {
+          spyShown = (performance.now() - spyStart) * spySpeed / 1000;
+          spyWatch.textContent = '🕵️ ' + spyShown.toFixed(2) + ' s';
+        }, 30);
+      }
+    });
+
+    // Hook: the moment the light goes back to red
+    const originalShowGreen = window.showGreen;
+    window.showGreen = function (isGreen) {
+      originalShowGreen(isGreen);
+      if (!isGreen) {
+        sfx.stop();
+        if (spyTimer) { clearInterval(spyTimer); spyTimer = null; spyWatch.classList.add('hidden'); }
+      }
+    };
+
+    // Hook: after each round result is drawn
+    const originalShowRoundResult = window.showRoundResult;
+    window.showRoundResult = function (results) {
+      originalShowRoundResult(results);
+      const items = [...ranking.children];   // same order as the sorted results
+      const bestOff = Math.abs(results[0].signed);
+      let exactHit = false, clockHit = false;
+
+      results.forEach((r, i) => {
+        const li = items[i], who = li && li.querySelector('.who');
+        if (!who) return;
+        const off = Math.abs(r.signed);
+        if (off === 0) {
+          who.insertAdjacentHTML('beforeend', ' <span class="fx-badge exact">💥 PERFECT</span>');
+          exactHit = true;
+          setTimeout(() => burstFrom(li, GOLDS, 120, 13), 150);
+        } else if (off <= HUMAN_CLOCK) {
+          who.insertAdjacentHTML('beforeend', ' <span class="fx-badge clock">⏱️ Human clock</span>');
+          clockHit = true;
+          setTimeout(() => burstFrom(li, GREENS, 50, 8), 150);
+        }
+        if (goldenRound && off === bestOff) {
+          stars.set(r.player.name, (stars.get(r.player.name) || 0) + 1);
+          who.insertAdjacentHTML('beforeend', ' <span class="fx-badge star">⭐ golden star</span>');
+          setTimeout(() => burstFrom(li, GOLDS, 70, 10), 300);
+        }
+      });
+
+      if (goldenRound) {
+        statusText.insertAdjacentHTML('beforeend', '<br><span class="gold-banner">✨ Golden round – the winner takes a ⭐</span>');
+      }
+      if (spyMode) {
+        statusText.insertAdjacentHTML('beforeend',
+          `<span class="spy-note">🕵️ The spy stopwatch said ${spyShown.toFixed(2)} s… it was running at ×${spySpeed.toFixed(2)} speed. Never trust a spy!</span>`);
+      }
+
+      if (exactHit) { sfx.exact(); shake(); toast('💥 PERFECT! Exactly on the hundredth!'); }
+      else if (clockHit) { sfx.clock(); }
+      if (goldenRound) shake();
+
+      goldenRound = false;
+      renderScoreboard();   // show the new stars
+    };
+
+    // Hook: show golden stars next to names in the scoreboard
+    const originalRenderScoreboard = window.renderScoreboard;
+    window.renderScoreboard = function () {
+      originalRenderScoreboard();
+      if (!stars.size) return;
+      scoreboardBox.querySelectorAll('td.name').forEach(td => {
+        const name = td.lastChild && td.lastChild.textContent;
+        const n = stars.get(name);
+        if (n) td.insertAdjacentHTML('beforeend', `<span class="stars" title="Golden stars">${'⭐'.repeat(n)}</span>`);
+      });
+    };
+
+    // Hook: a new game clears the stars and the golden look
+    const originalNewGame = window.newGame;
+    window.newGame = function (count) { stars = new Map(); green.classList.remove('gold'); originalNewGame(count); };
+    const originalReady = window.readyForRound;
+    window.readyForRound = function () { green.classList.remove('gold'); originalReady(); };
+
+    // ---------- Secret: Konami code, or tap the ⏱️ in the title 5 times ----------
+    function toggleSpy() {
+      spyMode = !spyMode;
+      sfx.secret();
+      burstFrom(document.querySelector('h1'), GREENS.concat(GOLDS), 80, 10);
+      toast(spyMode
+        ? '🕵️ Secret unlocked: <strong>Spy stopwatch</strong>! It will help you… or will it?'
+        : '🕵️ Spy stopwatch switched off.');
+    }
+    const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
+    let kPos = 0;
+    document.addEventListener('keydown', (e) => {
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      kPos = key === KONAMI[kPos] ? kPos + 1 : (key === KONAMI[0] ? 1 : 0);
+      if (kPos === KONAMI.length) { kPos = 0; toggleSpy(); }
+    });
+
+    const h1 = document.querySelector('h1');
+    let taps = 0, tapTimer = null;
+    h1.addEventListener('click', () => {
+      taps++;
+      clearTimeout(tapTimer);
+      tapTimer = setTimeout(() => { taps = 0; }, 1500);
+      if (taps >= 5) { taps = 0; toggleSpy(); }
+    });
+  })();
   </script>
 </body>
 </html>
